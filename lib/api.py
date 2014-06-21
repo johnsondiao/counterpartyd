@@ -1,5 +1,5 @@
 #! /usr/bin/python3
-
+import pdb
 import sys
 import os
 import threading
@@ -430,6 +430,7 @@ class APIServer(threading.Thread):
 
         @dispatcher.add_method
         def create_send(source, destination, asset, quantity, encoding='multisig', pubkey=None, allow_unconfirmed_inputs=False, fee=None):
+            pdb.set_trace()
             tx_info = send.compose(db, source, destination, asset, quantity)
             return bitcoin.transaction(tx_info, encoding=encoding, exact_fee=fee, public_key_hex=pubkey, allow_unconfirmed_inputs=allow_unconfirmed_inputs)
 

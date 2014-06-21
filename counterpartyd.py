@@ -12,6 +12,7 @@ import calendar
 import configparser
 from threading import Thread
 import binascii
+import pdb
 
 import requests
 import appdirs
@@ -151,7 +152,7 @@ def market (give_asset, get_asset):
 
 
 def cli(method, params, unsigned):
-
+    pdb.set_trace()
     # Get unsigned transaction serialisation.
     if bitcoin.is_valid(params['source']):
         if bitcoin.is_mine(params['source']):
@@ -447,8 +448,9 @@ def set_options (data_dir=None,
             config.UNSPENDABLE = 'mvCounterpartyXXXXXXXXXXXXXXW24Hef'
         else:
             config.ADDRESSVERSION = b'\x6f'
-            config.BLOCK_FIRST = 154908
-            config.BURN_START = 154908
+            config.ADDRESSVERSION_MULTISIG = b'\xc4'
+            config.BLOCK_FIRST = 10
+            config.BURN_START = 10
             config.BURN_END = 4017708   # Fifty years, at ten minutes per block.
             config.UNSPENDABLE = 'mvCounterpartyXXXXXXXXXXXXXXW24Hef'
     else:
@@ -474,7 +476,7 @@ def set_options (data_dir=None,
         config.BROADCAST_TX_MAINNET = 'bitcoind'
 
 def balances (address):
-    if not bitcoin.base58_decode(address, config.ADDRESSVERSION):
+    if not bitcoin.base58_decode(address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG):
         raise exceptions.AddressError('Not a valid Bitcoin address:',
                                              address)
     address_data = get_address(db, address=address)
@@ -791,7 +793,7 @@ if __name__ == '__main__':
     # VIEWING (temporary)
     elif args.action == 'balances':
         try:
-            bitcoin.base58_decode(args.address, config.ADDRESSVERSION)
+            bitcoin.base58_decode(args.address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG)
         except Exception:
             raise exceptions.AddressError('Invalid Bitcoin address:',
                                                   args.address)

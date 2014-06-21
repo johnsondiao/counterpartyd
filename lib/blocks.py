@@ -3,7 +3,7 @@ Initialise database.
 
 Sieve blockchain for Counterparty transactions, and add them to the database.
 """
-
+import pdb
 import os
 import time
 import binascii
@@ -638,18 +638,21 @@ def initialise(db):
 
 def get_pubkeyhash (scriptpubkey):
     asm = scriptpubkey['asm'].split(' ')
-    if len(asm) != 5 or asm[0] != 'OP_DUP' or asm[1] != 'OP_HASH160' or asm[3] != 'OP_EQUALVERIFY' or asm[4] != 'OP_CHECKSIG':
-        return False
-    return asm[2]
-
+    if len(asm) == 5 and asm[0] == 'OP_DUP' and asm[1] == 'OP_HASH160' and asm[3] == 'OP_EQUALVERIFY' and asm[4] == 'OP_CHECKSIG':
+        return asm[2], False
+    elif len(asm) == 3 and asm[0] == 'OP_HASH160' and asm[2] == 'OP_EQUAL':
+        return asm[1], True
+    else:
+        return False, False
 def get_address (scriptpubkey):
-    pubkeyhash = get_pubkeyhash(scriptpubkey)
+    pubkeyhash, p2sh = get_pubkeyhash(scriptpubkey)
     if not pubkeyhash: return False
 
-    address = bitcoin.base58_check_encode(pubkeyhash, config.ADDRESSVERSION)
-
+    address = bitcoin.base58_check_encode(pubkeyhash, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG, p2sh)
     # Test decoding of address.
-    if address != config.UNSPENDABLE and binascii.unhexlify(bytes(pubkeyhash, 'utf-8')) != bitcoin.base58_decode(address, config.ADDRESSVERSION):
+    encodehash, vp2sh = bitcoin.base58_decode(address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG)
+    
+    if address != config.UNSPENDABLE and binascii.unhexlify(bytes(pubkeyhash, 'utf-8')) != encodehash:
         return False
 
     return address
@@ -668,7 +671,6 @@ def get_tx_info (tx, block_index):
     pubkeyhash_encoding = False
     for vout in tx['vout']:
         fee -= vout['value'] * config.UNIT
-
         # Sum data chunks to get data. (Can mix OP_RETURN and multi-sig.)
         asm = vout['scriptPubKey']['asm'].split(' ')
         if len(asm) == 2 and asm[0] == 'OP_RETURN':                                                 # OP_RETURN
@@ -681,25 +683,7 @@ def get_tx_info (tx, block_index):
             data_chunk_length = data_pubkey[0]  # No ord() necessary.
             data_chunk = data_pubkey[1:data_chunk_length + 1]
             data += data_chunk
-        elif len(asm) == 5 and (block_index >= 293000 or config.TESTNET):    # Protocol change.
-            # Be strict.
-            pubkeyhash_string = get_pubkeyhash(vout['scriptPubKey'])
-            try: pubkeyhash = binascii.unhexlify(bytes(pubkeyhash_string, 'utf-8'))
-            except binascii.Error: continue
-
-            if 'coinbase' in tx['vin'][0]: return b'', None, None, None, None
-            obj1 = ARC4.new(binascii.unhexlify(bytes(tx['vin'][0]['txid'], 'utf-8')))
-            data_pubkey = obj1.decrypt(pubkeyhash)
-            if data_pubkey[1:9] == config.PREFIX or pubkeyhash_encoding:
-                pubkeyhash_encoding = True
-                data_chunk_length = data_pubkey[0]  # No ord() necessary.
-                data_chunk = data_pubkey[1:data_chunk_length + 1]
-                if data_chunk[-8:] == config.PREFIX:
-                    data += data_chunk[:-8]
-                    break
-                else:
-                    data += data_chunk
-
+                    
         # Destination is the first output before the data.
         if not destination and not btc_amount and not data:
             address = get_address(vout['scriptPubKey'])

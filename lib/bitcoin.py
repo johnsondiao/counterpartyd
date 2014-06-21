@@ -2,7 +2,7 @@
 Craft, sign and broadcast Bitcoin transactions.
 Interface with Bitcoind.
 """
-
+import pdb
 import os
 import sys
 import binascii
@@ -13,7 +13,7 @@ import time
 import getpass
 import decimal
 import logging
-
+import pdb
 import requests
 from pycoin.ecdsa import generator_secp256k1, public_pair_for_secret_exponent
 from pycoin.encoding import wif_to_tuple_of_secret_exponent_compressed, public_pair_to_sec
@@ -27,6 +27,7 @@ OP_RETURN = b'\x6a'
 OP_PUSHDATA1 = b'\x4c'
 OP_DUP = b'\x76'
 OP_HASH160 = b'\xa9'
+OP_EQUAL = b'\x87'
 OP_EQUALVERIFY = b'\x88'
 OP_CHECKSIG = b'\xac'
 OP_1 = b'\x51'
@@ -164,10 +165,13 @@ def rpc (method, params):
     else:
         raise exceptions.BitcoindError('{}'.format(response_json['error']))
 
-def base58_check_encode(b, version):
+def base58_check_encode(b, version, version2, p2sh):
     b = binascii.unhexlify(bytes(b, 'utf-8'))
-    d = version + b   # mainnet
-
+    #TODO NEED TO HANDLE DIFFERENT VERSION
+    if p2sh:
+        d = version2 + b   
+    else:
+        d = version + b
     address_hex = d + dhash(d)[:4]
 
     # Convert big‐endian bytes to integer
@@ -188,7 +192,7 @@ def base58_check_encode(b, version):
         else: break
     return b58_digits[0] * pad + res
 
-def base58_decode (s, version):
+def base58_decode (s, version, version2):
     # Convert the string to an integer
     n = 0
     for c in s:
@@ -197,7 +201,6 @@ def base58_decode (s, version):
             raise exceptions.InvalidBase58Error('Not a valid base58 character:', c)
         digit = b58_digits.index(c)
         n += digit
-
     # Convert the integer to bytes
     h = '%x' % n
     if len(h) % 2:
@@ -209,15 +212,20 @@ def base58_decode (s, version):
     for c in s[:-1]:
         if c == b58_digits[0]: pad += 1
         else: break
+    #TODO need to handle the different version
     k = version * pad + res
 
     addrbyte, data, chk0 = k[0:1], k[1:-4], k[-4:]
-    if addrbyte != version:
+    if addrbyte != version and addrbyte != version2:
         raise exceptions.VersionByteError('incorrect version byte')
     chk1 = dhash(addrbyte + data)[:4]
     if chk0 != chk1:
         raise exceptions.Base58ChecksumError('Checksum mismatch: %r ≠ %r' % (chk0, chk1))
-    return data
+    if addrbyte == version2:
+        p2sh = True
+    else:
+        p2sh = False
+    return data, p2sh
 
 def var_int (i):
     if i < 0xfd:
@@ -269,14 +277,20 @@ def serialise (encoding, inputs, destination_outputs, data_output=None, change_o
 
     # Destination output.
     for address, value in destination_outputs:
-        pubkeyhash = base58_decode(address, config.ADDRESSVERSION)
+        pubkeyhash, p2sh = base58_decode(address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG)
         s += value.to_bytes(8, byteorder='little')          # Value
-        script = OP_DUP                                     # OP_DUP
-        script += OP_HASH160                                # OP_HASH160
-        script += op_push(20)                               # Push 0x14 bytes
-        script += pubkeyhash                                # pubKeyHash
-        script += OP_EQUALVERIFY                            # OP_EQUALVERIFY
-        script += OP_CHECKSIG                               # OP_CHECKSIG
+        if p2sh :
+            script = OP_HASH160
+            script += op_push(len(pubkeyhash))
+            script += pubkeyhash
+            script += OP_EQUAL
+        else:
+            script = OP_DUP                                     # OP_DUP
+            script += OP_HASH160                                # OP_HASH160
+            script += op_push(20)                               # Push 0x14 bytes
+            script += pubkeyhash                                # pubKeyHash
+            script += OP_EQUALVERIFY                            # OP_EQUALVERIFY
+            script += OP_CHECKSIG                               # OP_CHECKSIG
         s += var_int(int(len(script)))                      # Script length
         s += script
 
@@ -324,14 +338,20 @@ def serialise (encoding, inputs, destination_outputs, data_output=None, change_o
     # Change output.
     if change_output:
         address, value = change_output
-        pubkeyhash = base58_decode(address, config.ADDRESSVERSION)
+        pubkeyhash, p2sh = base58_decode(address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG)
         s += value.to_bytes(8, byteorder='little')          # Value
-        script = OP_DUP                                     # OP_DUP
-        script += OP_HASH160                                # OP_HASH160
-        script += op_push(20)                               # Push 0x14 bytes
-        script += pubkeyhash                                # pubKeyHash
-        script += OP_EQUALVERIFY                            # OP_EQUALVERIFY
-        script += OP_CHECKSIG                               # OP_CHECKSIG
+        if p2sh :
+            script = OP_HASH160
+            script += op_push(len(pubkeyhash))
+            script += pubkeyhash
+            script += OP_EQUAL
+        else:
+            script = OP_DUP                                     # OP_DUP
+            script += OP_HASH160                                # OP_HASH160
+            script += op_push(20)                               # Push 0x14 bytes
+            script += pubkeyhash                                # pubKeyHash
+            script += OP_EQUALVERIFY                            # OP_EQUALVERIFY
+            script += OP_CHECKSIG                               # OP_CHECKSIG
         s += var_int(int(len(script)))                      # Script length
         s += script
 
@@ -375,6 +395,21 @@ def private_key_to_public_key (private_key_wif):
     public_key_hex = binascii.hexlify(public_key).decode('utf-8')
     return public_key_hex
 
+
+def get_address_type(address):
+    if config.TESTNET:
+        pdb.set_trace()
+        if address[0] == '2':
+            return True
+        else:
+            return False
+    else:
+        if address[0] == '3':
+            return True
+        else:
+            return False
+   
+        
 # Replace unittest flag with fake bitcoind JSON-RPC server.
 def transaction (tx_info, encoding, exact_fee=None, fee_provided=0, unittest=False, public_key_hex=None, allow_unconfirmed_inputs=False):
 
@@ -386,31 +421,39 @@ def transaction (tx_info, encoding, exact_fee=None, fee_provided=0, unittest=Fal
         raise exceptions.TransactionError('Fee provided must be in satoshis.')
     if encoding not in ('pubkeyhash', 'multisig', 'opreturn'):
         raise exceptions.TransactionError('Unknown encoding‐scheme.')
-
+    
     # If public key is necessary for construction of (unsigned) transaction,
     # either use the public key provided, or derive it from a private key
     # retrieved from wallet.
     public_key = None
     if encoding in ('multisig', 'pubkeyhash'):
-        # If no public key was provided, derive from private key.
-        if not public_key_hex:
-            # Get private key.
-            if unittest:
-                private_key_wif = 'cPdUqd5EbBWsjcG9xiL1hz8bEyGFiz4SW99maU9JgpL9TEcxUf3j'
-            else:
-                private_key_wif = rpc('dumpprivkey', [source])
+        # get the address type
+        pdb.set_trace()
+        p2sh = get_address_type(source)
+        if p2sh:
+            temp = rpc('validateaddress', [source])
+            redeemscript = temp['hex']
+        else:
+            # If no public key was provided, derive from private key.
+            if not public_key_hex:
+                # Get private key.
+                if unittest:
+                    private_key_wif = 'cPdUqd5EbBWsjcG9xiL1hz8bEyGFiz4SW99maU9JgpL9TEcxUf3j'
+                else:
+                    private_key_wif = rpc('dumpprivkey', [source])
 
-            # Derive public key.
-            public_key_hex = private_key_to_public_key(private_key_wif)
-            
-        pubkeypair = bitcoin_utils.parse_as_public_pair(public_key_hex)
-        if not pubkeypair:
-            raise exceptions.InputError('Invalid private key.')
-        public_key = public_pair_to_sec(pubkeypair, compressed=True)
+                # Derive public key.
+                public_key_hex = private_key_to_public_key(private_key_wif)
+                
+            pubkeypair = bitcoin_utils.parse_as_public_pair(public_key_hex)
+            if not pubkeypair:
+                raise exceptions.InputError('Invalid private key.')
+            public_key = public_pair_to_sec(pubkeypair, compressed=True)
 
     # Protocol change.
     if encoding == 'pubkeyhash' and get_block_count() < 293000 and not config.TESTNET:
         raise exceptions.TransactionError('pubkeyhash encoding unsupported before block 293000')
+
     
     if config.PREFIX == config.UNITTEST_PREFIX: unittest = True
 
@@ -419,7 +462,7 @@ def transaction (tx_info, encoding, exact_fee=None, fee_provided=0, unittest=Fal
     for address in destinations + [source]:
         if address:
             try:
-                base58_decode(address, config.ADDRESSVERSION)
+                base58_decode(address, config.ADDRESSVERSION, config.ADDRESSVERSION_MULTISIG)
             except Exception:   # TODO
                 raise exceptions.AddressError('Invalid Bitcoin address:', address)
 
